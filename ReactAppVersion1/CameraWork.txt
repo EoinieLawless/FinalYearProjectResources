@@ -1,0 +1,31 @@
+import React, { useRef, useState } from 'react';
+import Webcam from 'react-webcam';
+import './App.css';
+
+function App() {
+  const webcamRef = useRef(null);
+  const [imageSrc, setImageSrc] = useState(null);
+
+  const capture = () => {
+    const imageSrc = webcamRef.current.getScreenshot();
+    setImageSrc(imageSrc);
+  };
+
+  return (
+    <div className="App">
+      <header className="App-header">
+        <h1>Main Page</h1>
+        <Webcam
+          audio={false}
+          ref={webcamRef}
+          screenshotFormat="image/jpeg"
+          style={{ width: '100%', height: 'auto' }}
+        />
+        <button onClick={capture}>Capture Photo</button>
+        {imageSrc && <img src={imageSrc} alt="Captured" />}
+      </header>
+    </div>
+  );
+}
+
+export default App;

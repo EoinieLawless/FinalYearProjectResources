@@ -1,0 +1,98 @@
+import React, { useEffect, useRef, useState } from "react";
+import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
+import pose_landmarker_lite_task from "./pose_landmarker_lite.task";
+
+const Demo = () => {
+    const videoRef = useRef(null);
+    const canvasRef = useRef(null);
+    const [posePresence, setPosePresence] = useState(false);
+
+    useEffect(() => {
+        let poseLandmarker;
+        let animationFrameId;
+
+        const initializePoseDetection = async () => {
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm",
+                );
+                poseLandmarker = await PoseLandmarker.createFromOptions(
+                    vision, {
+                        modelAssetPath: pose_landmarker_lite_task,
+                    }
+                );
+                detectPose();
+            } catch (error) {
+                console.error("Error initializing detection:", error);
+            }
+        };
+
+        const drawKeypoints = (keypoints) => {
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+
+            keypoints.forEach(keypoint => {
+                const x = keypoint.x * canvas.width;
+                const y = keypoint.y * canvas.height;
+
+                ctx.beginPath();
+                ctx.arc(x, y, 5, 0, 2 * Math.PI); // Draws a circle for each keypoint
+                ctx.fill();
+            });
+        };
+
+        const detectPose = async () => {
+            if (videoRef.current && videoRef.current.readyState >= 2) {
+                const detections = await poseLandmarker.estimatePoses(
+                    videoRef.current,
+                    { enableSegmentation: false }
+                );
+                setPosePresence(detections.length > 0);
+
+                // Assuming detections is an array of pose objects
+                if (detections.length > 0) {
+                    drawKeypoints(detections[0].landmarks);
+                }
+            }
+            animationFrameId = requestAnimationFrame(detectPose);
+        };
+
+        const startWebcam = async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                videoRef.current.srcObject = stream;
+                await initializePoseDetection();
+            } catch (error) {
+                console.error("Error accessing webcam:", error);
+            }
+        };
+
+        startWebcam();
+
+        return () => {
+            if (videoRef.current && videoRef.current.srcObject) {
+                videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+            }
+            if (poseLandmarker) {
+                poseLandmarker.close();
+            }
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+        };
+    }, []);
+
+    return (
+        <>
+            <h1>Detection working: {posePresence ? "Yes" : "No"}</h1>
+            <div style={{ position: "relative" }}>
+                <video ref={videoRef} autoPlay playsInline ></video>
+                <canvas ref={canvasRef} style={{ backgroundColor: "black", width: "600px", height: "480px" }}></canvas>
+            </div>
+        </>
+    );
+};
+
+export default Demo;

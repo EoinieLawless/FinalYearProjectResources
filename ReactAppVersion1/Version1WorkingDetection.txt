@@ -1,0 +1,88 @@
+import React, { useState, useEffect, useRef } from "react";
+import { PoseLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
+
+const App = () => {
+  const [poseLandmarker, setPoseLandmarker] = useState(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const initPoseLandmarker = async () => {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+      );
+      const poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task`,
+          delegate: "GPU"
+        },
+        runningMode: "IMAGE",
+        numPoses: 1
+      });
+      setPoseLandmarker(poseLandmarker);
+    };
+
+    initPoseLandmarker();
+
+    return () => {
+      if (poseLandmarker) {
+        poseLandmarker.close();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const drawingUtils = new DrawingUtils(ctx);
+
+    let animationFrameId;
+
+    const predictWebcam = async () => {
+      setIsDetecting(true);
+      const result = await poseLandmarker?.detect(video);
+      setIsDetecting(false);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (result && result.landmarks.length > 0) {
+        for (let i = 0; i < result.landmarks.length; i += 2) {
+          const landmark = result.landmarks[i];
+          drawingUtils.drawLandmarks(landmark, {
+              radius: (data) => data.from ? DrawingUtils.lerp(data.from.z, -0.15, 0.1, 5, 20) : 0
+          });
+          drawingUtils.drawConnectors(landmark, PoseLandmarker.POSE_CONNECTIONS);
+      }
+      }
+      animationFrameId = requestAnimationFrame(predictWebcam);
+    };
+
+    if (poseLandmarker && video) {
+      const constraints = { video: true };
+
+      navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+        video.srcObject = stream;
+        video.addEventListener("loadeddata", () => {
+          predictWebcam();
+        });
+      });
+    }
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [poseLandmarker]);
+
+  return (
+    <div style={{ position: "relative", width: "100%" }}>
+      {isDetecting && <p style={{ position: "absolute", top: 0, left: 0 }}>Detecting landmarks...</p>}
+      <video ref={videoRef} autoPlay style={{ position: "relative", zIndex: 1 }} />
+      <canvas ref={canvasRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 2 }} />
+    </div>
+  );
+};
+
+export default App;

@@ -1,0 +1,192 @@
+import React, { useState, useEffect, useRef } from "react";
+import { PoseLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
+import { db, storage } from './firebase-config';
+import { collection, addDoc } from 'firebase/firestore';
+import { ref, uploadBytes } from 'firebase/storage';
+
+
+const App = () => {
+  const [poseLandmarker, setPoseLandmarker] = useState(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [angle, setAngle] = useState(null);
+  const [showWarning, setShowWarning] = useState(false);
+  const [angles, setAngles] = useState([]);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [intervalId, setIntervalId] = useState(null);
+
+
+ {/* const startCapture = () => {
+    setIsDetecting(true); // Update isDetecting to true when starting capture
+    const id = setInterval(() => {
+      // Your logic to capture the angle and add to the angles state
+      if (angle !== null) {
+        const newEntry = { timestamp: Date.now(), angle };
+        setAngles(prev => [...prev, newEntry]);
+      }
+    }, 3000);
+    setIntervalId(id); // Save interval ID
+  };
+
+  const stopCaptureAndUpload = async () => {
+    clearInterval(intervalId); // Use the intervalId from state to clear the interval
+    setIsDetecting(false); // Update isDetecting to false when stopping capture
+    console.log("Stopped capturing angles.");
+    
+    // Generate CSV string from the angles state
+    const csvString = "timestamp,angle\n" + angles.map(a => `${a.timestamp},${a.angle.toFixed(2)}`).join('\n');
+    const blob = new Blob([csvString], { type: 'text/csv' });
+    
+    // Save CSV to Firebase Storage
+    const storageRef = ref(storage, `angles/${new Date().toISOString()}.csv`);
+    uploadBytes(storageRef, blob).then((snapshot) => {
+      console.log('CSV file uploaded to Firebase Storage.', snapshot);
+    }).catch((error) => {
+      console.error('Error uploading CSV file:', error);
+    });
+  };
+
+  const addAngleToFirestore = async (angle) => {
+    try {
+      const docRef = await addDoc(collection(db, "angles"), {
+        angle: angle,
+        timestamp: Date.now(),
+      });
+      console.log("Document written with ID: ", docRef.id);
+    } catch (e) {
+      console.error("Error adding document: ", e);
+    }
+  }; */}
+  
+  
+
+  useEffect(() => {
+    const initPoseLandmarker = async () => {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+      );
+      const poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task`,
+          delegate: "GPU"
+        },
+        runningMode: "IMAGE",
+        numPoses: 1
+      });
+      setPoseLandmarker(poseLandmarker);
+    };
+
+    initPoseLandmarker();
+
+    return () => {
+      if (poseLandmarker) {
+        poseLandmarker.close();
+      }
+    };
+  }, []);
+
+  {/*
+  //Time for the firbase 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (angle !== null) {
+        addAngleToFirestore(angle);
+      }
+    }, 3000); // Every 3 seconds
+  
+    return () => clearInterval(interval);
+  }, [angle]);
+
+  */}
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const drawingUtils = new DrawingUtils(ctx);
+
+    let animationFrameId;
+
+    const predictWebcam = async () => {
+      setIsDetecting(true);
+      const result = await poseLandmarker?.detect(video);
+      setIsDetecting(false);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (result && result.landmarks.length > 0) {
+        result.landmarks.forEach((landmark) => {
+          drawingUtils.drawLandmarks(landmark, {
+            radius: (data) => data.from ? DrawingUtils.lerp(data.from.z, -0.15, 0.1, 5, 20) : 0
+          });
+          drawingUtils.drawConnectors(landmark, PoseLandmarker.POSE_CONNECTIONS);
+
+          const angleValue = calculateAngle(landmark[11], landmark[12], landmark[24]); // Assuming 11, 12 are shoulders, 24 is neck in landmark indices
+          setAngle(angleValue);
+          
+          const isOutOfLine = angleValue < 80 || angleValue > 89; // Adjust the range as needed
+          setShowWarning(isOutOfLine);
+        });
+      }
+      animationFrameId = requestAnimationFrame(predictWebcam);
+    };
+
+    if (poseLandmarker && video) {
+      const constraints = { video: true };
+      navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+        video.srcObject = stream;
+        video.addEventListener("loadeddata", () => {
+          predictWebcam();
+        });
+      });
+    }
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [poseLandmarker]);
+
+  const calculateAngle = (A, B, C) => {
+    const AB = Math.sqrt(Math.pow(B.x - A.x, 2) + Math.pow(B.y - A.y, 2));    
+    const BC = Math.sqrt(Math.pow(B.x - C.x, 2) + Math.pow(B.y - C.y, 2)); 
+    const AC = Math.sqrt(Math.pow(C.x - A.x, 2) + Math.pow(C.y - A.y, 2));
+    return Math.acos((BC * BC + AB * AB - AC * AC) / (2 * BC * AB)) * (180 / Math.PI);
+  };
+
+  //For the Csv file 
+  const downloadCsv = () => {
+    const csvRows = [
+      ["timestamp", "angle"],
+      ...angles.map((data) => [data.timestamp, data.angle.toFixed(2)]),
+    ];
+    const csvString = csvRows.map((row) => row.join(",")).join("\n");
+    const blob = new Blob([csvString], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "angles.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh" }}>
+      {isDetecting && <p>Detecting landmarks...</p>}
+      <div style={{ position: "relative" }}>
+        <video ref={videoRef} autoPlay style={{ zIndex: 1 }} />
+        <canvas ref={canvasRef} style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", zIndex: 2 }} />
+      </div>
+      <div style={{ marginTop: "20px" }}>
+        {angle !== null && <p>Angle: {angle.toFixed(2)}°</p>}
+        {showWarning && <p style={{ color: "red", fontWeight: "bold" }}>Warning: Neck angle out of line!</p>}
+      </div>
+      <button onClick={downloadCsv} style={{ marginTop: "20px" }}>Download Angles CSV</button>
+    </div>
+  );
+};
+
+export default App;
