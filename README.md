@@ -5,6 +5,7 @@ This repository is a collection of various resources related to the Dep-Fitness 
 Backup links 
 - Github main : https://github.com/duechayapolgmit/dep-fitness
 - Screencast :  https://www.youtube.com/watch?v=Cy9uHDY-8-4&feature=youtu.be
+- Website : https://dep-fitness.onrender.com/
 
 
 ## Contents
